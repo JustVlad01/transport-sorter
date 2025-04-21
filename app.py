@@ -124,6 +124,19 @@ class DriverPDFSorterApp:
         status_bar = ttk.Label(self.root, textvariable=self.status_var, relief=tk.SUNKEN, anchor=tk.W)
         status_bar.pack(side=tk.BOTTOM, fill=tk.X)
         
+        # Add radio buttons for tracking method
+        tracking_frame = ttk.LabelFrame(main_frame, text="Tracking Method", padding=10)
+        tracking_frame.pack(fill=tk.X, pady=(0, 20))
+        
+        self.tracking_var = tk.StringVar(value="customer_ref")
+        customer_ref_radio = ttk.Radiobutton(tracking_frame, text="Track by Customer Reference", 
+                                           value="customer_ref", variable=self.tracking_var)
+        customer_ref_radio.pack(anchor=tk.W, pady=5)
+        
+        account_radio = ttk.Radiobutton(tracking_frame, text="Track by Account Number", 
+                                      value="account_no", variable=self.tracking_var)
+        account_radio.pack(anchor=tk.W, pady=5)
+        
         # Try to load data if it exists
         self.load_existing_data()
         
@@ -196,6 +209,23 @@ class DriverPDFSorterApp:
         pdf_status_bar = ttk.Label(progress_frame, textvariable=self.pdf_status_var, relief=tk.SUNKEN, anchor=tk.W)
         pdf_status_bar.pack(side=tk.BOTTOM, fill=tk.X)
         
+        # Add radio buttons for PDF tracking method
+        tracking_frame = ttk.LabelFrame(main_frame, text="PDF Tracking Method", padding=10)
+        tracking_frame.pack(fill=tk.X, pady=(0, 20))
+        
+        self.pdf_tracking_var = tk.StringVar(value="auto_detect")
+        auto_radio = ttk.Radiobutton(tracking_frame, text="Auto Detect", 
+                                    value="auto_detect", variable=self.pdf_tracking_var)
+        auto_radio.pack(anchor=tk.W, pady=5)
+        
+        customer_ref_radio = ttk.Radiobutton(tracking_frame, text="Force Customer Reference", 
+                                           value="customer_ref", variable=self.pdf_tracking_var)
+        customer_ref_radio.pack(anchor=tk.W, pady=5)
+        
+        account_radio = ttk.Radiobutton(tracking_frame, text="Force Account Number", 
+                                      value="account_no", variable=self.pdf_tracking_var)
+        account_radio.pack(anchor=tk.W, pady=5)
+        
     def select_file(self):
         filetypes = [
             ("Excel files", "*.xlsx;*.xls"),
@@ -226,10 +256,22 @@ class DriverPDFSorterApp:
             # Read Excel file
             df = pd.read_excel(self.selected_file)
             
-            # Extract values from columns C and J (indices 2 and 9)
-            # Note: pandas uses 0-based indexing
-            column_c = df.iloc[:, 2].astype(str)
-            column_j = df.iloc[:, 9].astype(str)
+            # Get selected tracking method
+            tracking_method = self.tracking_var.get()
+            
+            if tracking_method == "customer_ref":
+                # Extract values from columns C and J (indices 2 and 9)
+                # Note: pandas uses 0-based indexing
+                column_c = df.iloc[:, 2].astype(str)
+                column_j = df.iloc[:, 9].astype(str)
+                column_names = ["Customer Ref", "Route"]
+            else:  # account_no
+                # Extract values from columns C and J (indices 2 and 9)
+                # Note: this assumes account numbers are in the same columns
+                # Adjust indices if needed for account numbers
+                column_c = df.iloc[:, 2].astype(str)
+                column_j = df.iloc[:, 9].astype(str)
+                column_names = ["Account Number", "Route"]
             
             # Create a dictionary mapping C values to J values
             data_dict = {c_val: j_val for c_val, j_val in zip(column_c, column_j)}
@@ -240,7 +282,7 @@ class DriverPDFSorterApp:
                 json.dump(data_dict, f, indent=4)
             
             # Update the treeview
-            self.update_treeview(data_dict)
+            self.update_treeview(data_dict, column_names)
             
             self.status_var.set(f"Processed {len(data_dict)} entries from {os.path.basename(self.selected_file)}")
             messagebox.showinfo("Success", f"Successfully processed {len(data_dict)} entries from the Excel file.")
@@ -249,7 +291,14 @@ class DriverPDFSorterApp:
             messagebox.showerror("Error", f"Error processing file: {str(e)}")
             self.status_var.set("Error processing file")
     
-    def update_treeview(self, data_dict):
+    def update_treeview(self, data_dict, column_names=None):
+        if column_names is None:
+            column_names = ["Customer Ref", "Route"]
+            
+        # Update column headings
+        self.tree.heading("column_c", text=column_names[0])
+        self.tree.heading("column_j", text=column_names[1])
+        
         # Clear existing items
         for item in self.tree.get_children():
             self.tree.delete(item)
@@ -381,6 +430,22 @@ class DriverPDFSorterApp:
     def find_customer_ref(self, text):
         if not text:
             return None
+            
+        # First try to find Account Number (as seen in the new file format)
+        account_pattern = re.compile(r'Account\s+No:?\s*([A-Z0-9]{4,10})\b', re.IGNORECASE)
+        match = account_pattern.search(text)
+        if match:
+            ref = match.group(1).strip()
+            self.log(f"Found Account Number: {ref}")
+            return ref
+            
+        # Also check for TOPA format as seen in the new screenshot
+        topa_pattern = re.compile(r'\bTOPA\d{3}\b')
+        match = topa_pattern.search(text)
+        if match:
+            ref = match.group(0).strip()
+            self.log(f"Found TOPA Account Number: {ref}")
+            return ref
             
         # Look for exact "Customer Ref." followed by value format
         # Pattern specifically for the Around Noon format seen in the screenshots
